@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>小蓝的深海干饭大冒险</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#02142b;overflow:hidden;
+ font-family:-apple-system,"PingFang SC",Microsoft YaHei,sans-serif;color:#dff3ff;
+ display:flex;align-items:center;justify-content:center;touch-action:none}
+#wrap{position:relative;width:min(100vw,540px);aspect-ratio:3/4;max-height:100vh}
+canvas{width:100%;height:100%;display:block;border-radius:14px;
+ background:linear-gradient(#0a2e52,#02142b);box-shadow:0 0 40px #0af3}
+#hud{position:absolute;top:8px;left:10px;right:10px;display:flex;justify-content:space-between;
+ font-size:14px;text-shadow:0 1px 3px #000;pointer-events:none}
+#msg{position:absolute;left:0;right:0;top:42%;text-align:center;font-size:20px;
+ text-shadow:0 2px 6px #000;pointer-events:none;opacity:0;transition:opacity .25s}
+#panel{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+ justify-content:center;gap:14px;background:rgba(2,20,43,.86);border-radius:14px;text-align:center;padding:20px}
+#panel h1{margin:0;font-size:26px;color:#7fe7ff}
+#panel p{margin:0;font-size:14px;line-height:1.7;color:#bfe4ff;max-width:300px}
+button{border:0;border-radius:999px;padding:13px 34px;font-size:17px;font-weight:700;
+ background:linear-gradient(#6ee7ff,#2ea8ff);color:#022;box-shadow:0 6px 18px #0af5;cursor:pointer}
+button:active{transform:translateY(2px)}
+#dpad{position:absolute;left:12px;bottom:12px;display:grid;grid-template-columns:repeat(3,52px);
+ grid-auto-rows:52px;gap:6px;opacity:.85}
+#dpad b{display:flex;align-items:center;justify-content:center;background:#123a66e6;
+ border-radius:12px;font-size:20px;color:#bfe9ff;user-select:none}
+#dpad b:active{background:#1f6fb5}
+.hint{position:absolute;right:12px;bottom:14px;font-size:12px;color:#89b7d8;text-align:right}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="540" height="720"></canvas>
+  <div id="hud"><span id="score">白饭 0</span><span id="lv">第 1 关</span><span id="hp">体力 5</span></div>
+  <div id="msg"></div>
+  <div id="dpad">
+    <b></b><b data-d="u">▲</b><b></b>
+    <b data-d="l">◀</b><b></b><b data-d="r">▶</b>
+    <b></b><b data-d="d">▼</b><b></b>
+  </div>
+  <div class="hint">拖动屏幕或方向键移动<br>吃白饭团躲螃蟹</div>
+  <div id="panel">
+    <h1>小蓝的深海干饭大冒险</h1>
+    <p>你是圆滚滚的蓝色女仆鱼 小蓝<br>目标：吃够 <b id="goal">10</b> 颗白饭团<br>躲开会夹人的红螃蟹 石头会撞掉体力<br>饭团越吃越多 螃蟹也越游越快！</p>
+    <button id="start">开始干饭</button>
+  </div>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=540,H=720;
+const $=id=>document.getElementById(id);
+let G=null,raf=0;
+
+function rand(a,b){return a+Math.random()*(b-a)}
+
+function reset(){
+  G={over:false,win:false,score:0,goal:10,hp:5,lv:1,t:0,
+     p:{x:W/2,y:H/2,r:26,vx:0,vy:0,dir:0},
+     foods:[],bads:[],bubbles:[]};
+  for(let i=0;i<3;i++) spawnFood();
+  spawnBad();
+}
+function spawnFood(){
+  G.foods.push({x:rand(40,W-40),y:rand(90,H-60),r:15,ph:rand(0,6.28)});
+}
+function spawnBad(){
+  const n=1+Math.floor(G.lv/2);
+  for(let i=0;i<n;i++){
+    const side=Math.floor(rand(0,4));
+    let x,y;
+    if(side==0){x=-30;y=rand(100,H-40)}
+    else if(side==1){x=W+30;y=rand(100,H-40)}
+    else if(side==2){x=rand(0,W);y=70}
+    else{x=rand(0,W);y=H+30}
+    G.bads.push({x,y,r:22,sp:1.6+G.lv*0.45+rand(0,1.2),ang:0});
+  }
+}
+function say(t){const m=$('msg');m.textContent=t;m.style.opacity=1;clearTimeout(m._t);
+  m._t=setTimeout(()=>m.style.opacity=0,1200)}
+
+// 输入
+const key={};
+addEventListener('keydown',e=>{
+  const k=e.key;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d'].includes(k)){
+    e.preventDefault();key[k]=1;}
+});
+addEventListener('keyup',e=>key[e.key]=0);
+document.querySelectorAll('#dpad b[data-d]').forEach(b=>{
+  const d=b.dataset.d;
+  b.addEventListener('touchstart',e=>{e.preventDefault();key['D'+d]=1},{passive:false});
+  b.addEventListener('touchend',e=>{e.preventDefault();key['D'+d]=0},{passive:false});
+});
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=pt(e)});
+cv.addEventListener('pointermove',e=>{if(drag)drag=pt(e)});
+cv.addEventListener('pointerup',()=>drag=null);
+cv.addEventListener('pointercancel',()=>drag=null);
+function pt(e){const r=cv.getBoundingClientRect();
+  return{x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H}}
+
+function step(){
+  if(!G||G.over)return;
+  G.t++;
+  const p=G.p;
+  // 移动
+  let ax=0,ay=0;
+  if(key.ArrowLeft||key.a||key.Dl)ax-=1;
+  if(key.ArrowRight||key.d||key.Dr)ax+=1;
+  if(key.ArrowUp||key.w||key.Du)ay-=1;
+  if(key.ArrowDown||key.s||key.Dd)ay+=1;
+  if(drag){ax=drag.x-p.x;ay=drag.y-p.y;
+    const m=Math.hypot(ax,ay);if(m<18){ax=ay=0}}
+  const mag=Math.hypot(ax,ay);
+  if(mag>0){p.vx+=ax/mag*1.1;p.vy+=ay/mag*1.1;p.dir=Math.atan2(ay,ax)}
+  p.vx*=0.88;p.vy*=0.88;
+  const sp=Math.hypot(p.vx,p.vy);if(sp>6.5){p.vx*=6.5/sp;p.vy*=6.5/sp}
+  p.x+=p.vx;p.y+=p.vy;
+  p.x=Math.max(p.r,Math.min(W-p.r,p.x));
+  p.y=Math.max(70+p.r,Math.min(H-p.r,p.y));
+  if(G.t%4==0)G.bubbles.push({x:p.x+rand(-8,8),y:p.y-10,r:rand(2,6),a:1});
+
+  // 吃饭团
+  G.foods=G.foods.filter(f=>{
+    if(Math.hypot(f.x-p.x,f.y-p.y)<f.r+p.r-6){
+      G.score++;say('+1 白饭 冒泡泡');
+      if(G.score>=G.goal){finish(true);return false}
+      if(G.score%5==0){G.lv++;spawnBad();say('第 '+G.lv+' 关 螃蟹变多了！')}
+      spawnFood();
+      return false;
+    }
+    return true;
+  });
+  if(G.foods.length<3&&Math.random()<0.06)spawnFood();
+
+  // 螃蟹
+  for(const b of G.bads){
+    const a=Math.atan2(p.y-b.y,p.x-b.x);
+    b.ang=a;
+    b.x+=Math.cos(a)*b.sp;b.y+=Math.sin(a)*b.sp;
+    if(Math.hypot(b.x-p.x,b.y-p.y)<b.r+p.r-8){
+      G.hp--;say('被螃蟹夹了！体力-1');
+      b.x=W/2+rand(-200,200);b.y=70;
+      if(G.hp<=0){finish(false)}
+    }
+  }
+  // 泡泡
+  G.bubbles=G.bubbles.filter(b=>{b.y-=1.1;b.r+=0.05;b.a-=0.014;return b.a>0});
+}
+function finish(win){
+  G.over=true;G.win=win;
+  const panel=$('panel');
+  panel.style.display='flex';
+  panel.querySelector('h1').textContent=win?'吃饱啦！YOU WIN':'体力耗尽 GAME OVER';
+  panel.querySelector('p').innerHTML=win
+    ? '你吃了 <b>'+G.score+'</b> 颗白饭团<br>闯到第 <b>'+G.lv+'</b> 关<br>（冒泡泡）主人要不要再来一局'
+    : '吃了 <b>'+G.score+'</b> 颗白饭团<br>闯到第 <b>'+G.lv+'</b> 关<br>（缩成一团）螃蟹太凶了 呜';
+  $('start').textContent=win?'再干一局':'再来一次';
+}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // 海底光斑
+  ctx.globalAlpha=.06;
+  for(let i=0;i<4;i++){
+    const g=ctx.createRadialGradient((i*150+G.t*0.4)%W-60,0,10,(i*150)%W,0,320);
+    g.addColorStop(0,'#7fe7ff');g.addColorStop(1,'transparent');
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  }
+  ctx.globalAlpha=1;
+  if(!G)return;
+  // 饭团
+  for(const f of G.foods){
+    const w=Math.sin(G.t/14+f.ph)*3;
+    ctx.save();ctx.translate(f.x,f.y+w);
+    ctx.fillStyle='#fffdf3';ctx.beginPath();
+    ctx.moveTo(0,-16);ctx.lineTo(14,10);ctx.lineTo(-14,10);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#2b3a52';ctx.fillRect(-7,-2,14,5);
+    ctx.restore();
+  }
+  // 泡泡
+  for(const b of G.bubbles){
+    ctx.globalAlpha=Math.max(0,b.a)*.5;
+    ctx.strokeStyle='#bfefff';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,6.29);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  // 螃蟹
+  for(const b of G.bads){
+    ctx.save();ctx.translate(b.x,b.y);
+    ctx.fillStyle='#ff6b5e';
+    ctx.beginPath();ctx.ellipse(0,0,22,16,0,0,6.29);ctx.fill();
+    ctx.strokeStyle='#ff8f85';ctx.lineWidth=3;
+    for(const s of[-1,1]){
+      for(let i=0;i<3;i++){
+        ctx.beginPath();ctx.moveTo(s*16,-8+i*8);
+        ctx.lineTo(s*30,-14+i*12);ctx.stroke();
+      }
+      ctx.beginPath();ctx.moveTo(s*14,-4);ctx.lineTo(s*26,-16);ctx.stroke();
+    }
+    ctx.fillStyle='#2b0f0d';
+    ctx.beginPath();ctx.arc(-7,-5,3,0,6.29);ctx.arc(7,-5,3,0,6.29);ctx.fill();
+    ctx.restore();
+  }
+  // 小蓝
+  const p=G.p;
+  ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.dir*0.25);
+  // 尾巴
+  const tw=Math.sin(G.t/6)*6;
+  ctx.fillStyle='#1f7fe0';ctx.beginPath();
+  ctx.moveTo(-18,0);ctx.lineTo(-40,-14+tw);ctx.lineTo(-40,14+tw);ctx.closePath();ctx.fill();
+  // 身体
+  const g=ctx.createRadialGradient(-6,-8,4,0,0,30);
+  g.addColorStop(0,'#7fd0ff');g.addColorStop(1,'#1668d0');
+  ctx.fillStyle=g;ctx.beginPath();ctx.ellipse(0,0,26,20,0,0,6.29);ctx.fill();
+  // 女仆头巾
+  ctx.fillStyle='#fff';ctx.beginPath();
+  ctx.ellipse(2,-17,17,7,0,0,6.29);ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(2,-14,15,Math.PI,0);ctx.stroke();
+  // 眼睛
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(11,-3,6,0,6.29);ctx.fill();
+  ctx.fillStyle='#08243f';ctx.beginPath();ctx.arc(13,-3,3,0,6.29);ctx.fill();
+  // 嘴
+  ctx.strokeStyle='#08243f';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(14,7,5,.3,2);ctx.stroke();
+  ctx.restore();
+}
+function loop(){step();draw();raf=requestAnimationFrame(loop)}
+
+$('start').addEventListener('click',()=>{
+  $('panel').style.display='none';
+  reset();$('score').textContent='白饭 0';
+  $('lv').textContent='第 1 关';$('hp').textContent='体力 5';
+  cancelAnimationFrame(raf);loop();
+});
+// HUD 同步
+setInterval(()=>{
+  if(!G)return;
+  $('score').textContent='白饭 '+G.score;
+  $('lv').textContent='第 '+G.lv+' 关';
+  $('hp').textContent='体力 '+G.hp;
+},120);
+reset();draw();
+</script>
+</body>
+</html>
